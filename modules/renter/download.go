@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"fmt"
+
 	"github.com/NebulousLabs/Sia/build"
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/modules"
@@ -421,9 +423,13 @@ loop:
 		if downloadComplete {
 			// The download has most likely failed. No need to complete this
 			// chunk.
-			ds.activePieces--                                       // For the current incomplete chunk.
+			fmt.Printf("Line 426, before --, activePieces: %d\n", ds.activePieces)
+			ds.activePieces-- // For the current incomplete chunk.
+			fmt.Printf("Line 428, after --, activePieces: %d\n", ds.activePieces)
+			fmt.Printf("Line 429, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 			ds.activePieces -= len(incompleteChunk.completedPieces) // For all completed pieces.
-
+			fmt.Printf("Line 431, after -= len(incompleteChunk.completedPieces), activePieces: %d\n", ds.activePieces)
+			fmt.Printf("Line 432, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 			// Clear the set of completed pieces so that we do not
 			// over-subtract if the above code is run multiple times.
 			incompleteChunk.completedPieces = make(map[uint64][]byte)
@@ -454,7 +460,12 @@ loop:
 			}
 			incompleteChunk.workerAttempts[worker.contractID] = true
 			ds.availableWorkers = append(ds.availableWorkers[:i], ds.availableWorkers[i+1:]...)
+			fmt.Printf("Line 463, before adding an activeWorker, activeWorker number: %d\n", len(ds.activeWorkers))
+			if _, exists := ds.activeWorkers[worker.contractID]; exists == true {
+				fmt.Printf("Line 465 WORKER EXISTS: YOU ARE ABOUT TO CREATE AN EMPTY STRUCT ON TOP OF THIS WORKER.")
+			}
 			ds.activeWorkers[worker.contractID] = struct{}{}
+			fmt.Printf("Line 468 after adding an activeWorker, activeWorker number: %d\n", len(ds.activeWorkers))
 			select {
 			case worker.priorityDownloadChan <- dw:
 			default:
@@ -475,6 +486,7 @@ loop:
 				// but is busy. Keep this chunk until the next iteration of the
 				// download loop.
 				newIncompleteChunks = append(newIncompleteChunks, incompleteChunk)
+				fmt.Printf("Line 489, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 				continue loop
 			}
 		}
@@ -489,13 +501,18 @@ loop:
 		incompleteChunk.download.fail(errInsufficientHosts)
 
 		// Clear out the piece burden for this chunk.
-		ds.activePieces--                                       // for the current incomplete chunk
+		fmt.Printf("Line 504, before --, activePieces: %d\n", ds.activePieces)
+		ds.activePieces-- // for the current incomplete chunk
+		fmt.Printf("Line 506, after --, activePieces: %d\n", ds.activePieces)
 		ds.activePieces -= len(incompleteChunk.completedPieces) // for all completed pieces
+		fmt.Printf("Line 508, after -= len(incompleteChunk.completedPieces), activePieces: %d\n", ds.activePieces)
+		fmt.Printf("Line 509, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 		// Clear the set of completed pieces so that we do not
 		// over-subtract if the above code is run multiple times.
 		incompleteChunk.completedPieces = make(map[uint64][]byte)
 	}
 	ds.incompleteChunks = newIncompleteChunks
+	fmt.Printf("Line 515, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 }
 
 // managedScheduleNewChunks uses the set of available workers to schedule new
@@ -536,7 +553,10 @@ func (r *Renter) managedScheduleNewChunks(ds *downloadState) {
 		for i := 0; i < nextChunk.download.erasureCode.MinPieces(); i++ {
 			ds.incompleteChunks = append(ds.incompleteChunks, nextChunk)
 		}
+		fmt.Printf("Line 556, before += nextChunk.download.erasureCode.MinPieces(), activePieces: %d\n", ds.activePieces)
 		ds.activePieces += nextChunk.download.erasureCode.MinPieces()
+		fmt.Printf("Line 558, after += nextChunk.download.erasureCode.MinPieces(), activePieces: %d\n", ds.activePieces)
+		fmt.Printf("Line 559, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 	}
 }
 
@@ -562,8 +582,9 @@ func (r *Renter) managedWaitOnDownloadWork(ds *downloadState) {
 
 	// Prepare the piece.
 	workerID := finishedDownload.workerID
+	fmt.Printf("Line 585, before deleting an activeWorker, activeWorker number: %d\n", len(ds.activeWorkers))
 	delete(ds.activeWorkers, workerID)
-
+	fmt.Printf("Line 587, after deleting an activeWorker, activeWorker number: %d\n", len(ds.activeWorkers))
 	// Fetch the corresponding worker.
 	id := r.mu.RLock()
 	worker, exists := r.workerPool[workerID]
@@ -588,14 +609,20 @@ func (r *Renter) managedWaitOnDownloadWork(ds *downloadState) {
 
 	if cd.download.downloadErr != nil {
 		r.log.Debugln("Piece succeeded but download failed; removing active piece")
+		fmt.Printf("Line 612, before --, activePieces: %d\n", ds.activePieces)
 		ds.activePieces--
+		fmt.Printf("Line 614, after --, activePieces: %d\n", ds.activePieces)
+		fmt.Printf("Line 615, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 		return
 	}
 
 	// If the chunk has completed, perform chunk recovery.
 	if len(cd.completedPieces) == cd.download.erasureCode.MinPieces() {
 		err := cd.recoverChunk()
+		fmt.Printf("Line 622, before -= len(cd.completedPieces), activePieces: %d\n", ds.activePieces)
 		ds.activePieces -= len(cd.completedPieces)
+		fmt.Printf("Line 624, after -= len(cd.completedPieces), activePieces: %d\n", ds.activePieces)
+		fmt.Printf("Line 625, sum of incompleteChunks + activeWorkers: %d and activePieces: %d\n", len(ds.incompleteChunks)+len(ds.activeWorkers), ds.activePieces)
 		cd.completedPieces = make(map[uint64][]byte)
 		if err != nil {
 			r.log.Println("Download failed - could not recover a chunk:", err)
